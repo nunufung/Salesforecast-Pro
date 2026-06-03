@@ -1,0 +1,8 @@
+{
+  "name": "SalesForecast Pro",
+  "description": "Professional sales forecasting dashboard with embedded AI Forecast Expert for advanced analysis and management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
