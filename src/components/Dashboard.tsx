@@ -223,18 +223,37 @@ export default function Dashboard() {
       return matchesSector && matchesFY && matchesFYQtr && matchesSalesPerson && matchesStatus && matchesCategory && matchesWinRate && matchesDate;
     });
 
-    // Apply fuzzy search if searchTerm exists
+    // Apply highly reliable substring search with fuzzy fallback
     if (searchTerm.trim()) {
-      const fuse = new Fuse(filtered, {
-        keys: ['itemName', 'customerName', 'salesPerson', 'partners', 'productType'],
-        threshold: 0.35, // Balanced fuzziness
-        location: 0,
-        distance: 100,
-        includeScore: true,
-        useExtendedSearch: true
+      const term = searchTerm.toLowerCase().trim();
+      const substringMatched = filtered.filter(record => {
+        return (
+          (record.itemName && record.itemName.toLowerCase().includes(term)) ||
+          (record.customerName && record.customerName.toLowerCase().includes(term)) ||
+          (record.salesPerson && record.salesPerson.toLowerCase().includes(term)) ||
+          (record.partners && record.partners.toLowerCase().includes(term)) ||
+          (record.productType && record.productType.toLowerCase().includes(term)) ||
+          (record.sector && record.sector.toLowerCase().includes(term)) ||
+          (record.status && record.status.toLowerCase().includes(term)) ||
+          (record.fy && record.fy.toLowerCase().includes(term)) ||
+          (record.fyQtr && record.fyQtr.toLowerCase().includes(term))
+        );
       });
-      const results = fuse.search(searchTerm);
-      filtered = results.map(result => result.item);
+
+      if (substringMatched.length > 0) {
+        filtered = substringMatched;
+      } else {
+        const fuse = new Fuse(filtered, {
+          keys: ['itemName', 'customerName', 'salesPerson', 'partners', 'productType', 'sector'],
+          threshold: 0.4,
+          location: 0,
+          distance: 100,
+          includeScore: true,
+          useExtendedSearch: true
+        });
+        const results = fuse.search(searchTerm);
+        filtered = results.map(result => result.item);
+      }
     }
 
     return [...filtered].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
@@ -242,7 +261,13 @@ export default function Dashboard() {
 
   const sectors = useMemo(() => [...new Set(allData.map(r => r.sector))].sort(), [allData]);
   const fyears = useMemo(() => [...new Set(allData.map(r => r.fy))].sort(), [allData]);
-  const fyQtrs = useMemo(() => [...new Set(allData.map(r => r.fyQtr))].sort(), [allData]);
+  const fyQtrs = useMemo(() => {
+    let quarters = [...new Set(allData.map(r => r.fyQtr))].sort();
+    if (selectedFYs.length > 0) {
+      quarters = quarters.filter(q => selectedFYs.some(fy => q.startsWith(fy)));
+    }
+    return quarters;
+  }, [allData, selectedFYs]);
   const salesPeople = useMemo(() => {
     const people = new Set<string>();
     allData.forEach(r => {
@@ -913,7 +938,15 @@ export default function Dashboard() {
                   {fyears.map(fy => (
                     <button
                       key={fy}
-                      onClick={() => setSelectedFYs(toggleFilter(selectedFYs, fy, 'All'))}
+                      onClick={() => {
+                        const nextFYs = toggleFilter(selectedFYs, fy, 'All');
+                        setSelectedFYs(nextFYs);
+                        if (nextFYs.length > 0) {
+                          setSelectedFYQtrs(prev => prev.filter(q => nextFYs.some(f => q.startsWith(f))));
+                        } else {
+                          setSelectedFYQtrs([]);
+                        }
+                      }}
                       className={cn(
                         "px-4 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all border",
                         selectedFYs.includes(fy) 
@@ -931,10 +964,24 @@ export default function Dashboard() {
                 <div className="flex items-center gap-2 mb-4">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block font-display">{t("Interval Quarter", "区间季度")}</span>
                 </div>
-                <div className="relative" ref={fyQtrRef}>
+                <div 
+                  className={cn(
+                    "relative rounded-xl transition-all duration-300",
+                    selectedFYQtrs.length > 0 
+                      ? "ring-2 ring-indigo-500/20 shadow-md shadow-indigo-100/50" 
+                      : ""
+                  )} 
+                  ref={fyQtrRef}
+                  id="dropdown-interval-quarter-wrapper"
+                >
                   <button
                     onClick={() => setIsFYQtrDropdownOpen(!isFYQtrDropdownOpen)}
-                    className="w-full flex items-center justify-between px-4 py-2.5 bg-slate-50 border border-slate-100 rounded-xl text-[10px] font-bold uppercase tracking-widest text-slate-500 hover:border-slate-200 transition-all group"
+                    className={cn(
+                      "w-full flex items-center justify-between px-4 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all duration-200 group border cursor-pointer",
+                      selectedFYQtrs.length > 0 
+                        ? "bg-indigo-50 border-indigo-250 text-indigo-700 hover:bg-indigo-100/80 hover:border-indigo-350" 
+                        : "bg-slate-50 border-slate-100 text-slate-500 hover:border-slate-200 hover:bg-slate-100/50"
+                    )}
                   >
                     <span className="truncate max-w-[150px]">
                       {selectedFYQtrs.length === 0 
@@ -943,7 +990,7 @@ export default function Dashboard() {
                           ? selectedFYQtrs[0] 
                           : `${selectedFYQtrs.length} ${t("Selected", "个已选")}`}
                     </span>
-                    <ChevronDown className={cn("w-3.5 h-3.5 transition-transform duration-300", isFYQtrDropdownOpen ? "rotate-180" : "")} />
+                    <ChevronDown className={cn("w-3.5 h-3.5 transition-transform duration-300 text-indigo-500", isFYQtrDropdownOpen ? "rotate-180" : "")} />
                   </button>
                   
                   <AnimatePresence>
@@ -968,7 +1015,15 @@ export default function Dashboard() {
                         {fyQtrs.map(q => (
                           <button
                             key={q}
-                            onClick={() => setSelectedFYQtrs(toggleFilter(selectedFYQtrs, q, 'All'))}
+                            onClick={() => {
+                              const nextQtrs = toggleFilter(selectedFYQtrs, q, 'All');
+                              setSelectedFYQtrs(nextQtrs);
+                              // Auto-align selected fiscal years based on selected quarters
+                              if (nextQtrs.length > 0) {
+                                const matchedYears = [...new Set(nextQtrs.map(val => val.slice(0, 4)))];
+                                setSelectedFYs(matchedYears);
+                              }
+                            }}
                             className={cn(
                               "w-full flex items-center justify-between px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all",
                               selectedFYQtrs.includes(q) ? "bg-slate-900 text-white shadow-md" : "text-slate-500 hover:bg-slate-50"
@@ -1305,7 +1360,20 @@ export default function Dashboard() {
 
         {/* Dashboard Content */}
         <div className="space-y-12">
-          <KPISection data={filteredData} />
+          <KPISection 
+            data={filteredData} 
+            allData={allData}
+            selectedFYs={selectedFYs}
+            selectedFYQtrs={selectedFYQtrs}
+            selectedSectors={selectedSectors}
+            selectedSalesPersons={selectedSalesPersons}
+            selectedStatuses={selectedStatuses}
+            selectedCategories={selectedCategories}
+            selectedWinRateOptions={selectedWinRateOptions}
+            startDate={startDate}
+            endDate={endDate}
+            searchTerm={searchTerm}
+          />
           
           <div className="space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between px-2 gap-4">
@@ -1356,7 +1424,21 @@ export default function Dashboard() {
           </div>
 
           <div className="pt-12 border-t border-slate-100/50">
-            <AdvancedAnalytics data={filteredData} />
+            <AdvancedAnalytics 
+              key={`analytics-${selectedFYs.join('-')}-${selectedFYQtrs.join('-')}`}
+              data={filteredData} 
+              allData={allData}
+              selectedSectors={selectedSectors}
+              selectedFYs={selectedFYs}
+              selectedFYQtrs={selectedFYQtrs}
+              selectedSalesPersons={selectedSalesPersons}
+              selectedStatuses={selectedStatuses}
+              selectedCategories={selectedCategories}
+              selectedWinRateOptions={selectedWinRateOptions}
+              startDate={startDate}
+              endDate={endDate}
+              searchTerm={searchTerm}
+            />
           </div>
         </div>
       </main>

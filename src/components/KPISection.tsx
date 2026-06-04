@@ -4,12 +4,48 @@ import { SalesRecord } from '../types';
 import { formatCurrency, formatNumber, cn } from '../lib/utils';
 import { TrendingUp, Users, Target, ArrowUpRight, AlertCircle } from 'lucide-react';
 import { motion } from 'motion/react';
+import Fuse from 'fuse.js';
 
 interface Props {
   data: SalesRecord[];
+  allData?: SalesRecord[];
+  selectedFYs?: string[];
+  selectedFYQtrs?: string[];
+  selectedSectors?: string[];
+  selectedSalesPersons?: string[];
+  selectedStatuses?: string[];
+  selectedCategories?: string[];
+  selectedWinRateOptions?: string[];
+  startDate?: string;
+  endDate?: string;
+  searchTerm?: string;
 }
 
-export default function KPISection({ data }: Props) {
+const WIN_RATE_OPTIONS_LOCAL = [
+  { id: 'ge90', test: (w: number) => w >= 0.9 },
+  { id: 'ge75', test: (w: number) => w >= 0.75 },
+  { id: 'ge50', test: (w: number) => w >= 0.5 },
+  { id: 'ge25', test: (w: number) => w >= 0.25 },
+  { id: 'r75-100', test: (w: number) => w >= 0.75 && w <= 1.0 },
+  { id: 'r50-75', test: (w: number) => w >= 0.5 && w < 0.75 },
+  { id: 'r25-50', test: (w: number) => w >= 0.25 && w < 0.50 },
+  { id: 'r0-25', test: (w: number) => w >= 0.0 && w < 0.25 }
+];
+
+export default function KPISection({ 
+  data,
+  allData = [],
+  selectedFYs = [],
+  selectedFYQtrs = [],
+  selectedSectors = [],
+  selectedSalesPersons = [],
+  selectedStatuses = [],
+  selectedCategories = [],
+  selectedWinRateOptions = [],
+  startDate = '',
+  endDate = '',
+  searchTerm = ''
+}: Props) {
   const metrics = useMemo(() => {
     const totalPipeline = data.reduce((sum, r) => sum + r.amountK, 0);
     
@@ -33,15 +69,136 @@ export default function KPISection({ data }: Props) {
       ? "Stagnation in 'Worst' category deals."
       : "Pipeline performance is stable.";
 
+    // YoY computations
+    let compTotalPipeline = 0;
+    let growth = 0;
+    let hasCompData = false;
+
+    const activeYears = selectedFYs && selectedFYs.length > 0
+      ? selectedFYs
+      : [...new Set(data.map(r => r.fy))].sort();
+    
+    const latestYear = activeYears[activeYears.length - 1] || 'FY26';
+    const currentYearNum = parseInt(latestYear.replace(/\D/g, '')) || 26;
+    const comparisonYear = `FY${currentYearNum - 1}`;
+
+    const currentYearData = data.filter(r => r.fy === latestYear);
+    
+    const activeMonths = [...new Set(currentYearData.map(r => {
+      const d = new Date(r.date);
+      return isNaN(d.getTime()) ? null : d.getMonth(); // 0-11
+    }))].filter(m => m !== null) as number[];
+
+    if (allData && allData.length > 0) {
+      let compData = allData.filter(r => r.fy === comparisonYear);
+      
+      compData = compData.filter(record => {
+        const matchesSector = selectedSectors.length === 0 || selectedSectors.includes(record.sector);
+        
+        const matchesFYQtr = selectedFYQtrs.length === 0 || (() => {
+          const fyCompEquivalentQtrs = selectedFYQtrs.map(q => q.replace(/FY\d+/, comparisonYear));
+          return fyCompEquivalentQtrs.includes(record.fyQtr);
+        })();
+        
+        const matchesSalesPerson = selectedSalesPersons.length === 0 || (() => {
+          if (!record.salesPerson) return false;
+          const parts = record.salesPerson.split(/[,;&]|\band\b|\//gi).map(p => p.trim()).filter(Boolean);
+          return selectedSalesPersons.some(sp => parts.includes(sp));
+        })();
+        
+        const matchesStatus = selectedStatuses.length === 0 || selectedStatuses.includes(record.status);
+        
+        const matchesCategory = selectedCategories.length === 0 || selectedCategories.includes(record.category);
+        
+        const matchesWinRate = selectedWinRateOptions.length === 0 || selectedWinRateOptions.some(optId => {
+          const option = WIN_RATE_OPTIONS_LOCAL.find(o => o.id === optId);
+          return option ? option.test(record.winRate) : true;
+        });
+        
+        const matchesDate = (() => {
+          let matches = true;
+          const curYVal = parseInt(latestYear.replace('FY', '')) || 26;
+          const compYVal = parseInt(comparisonYear.replace('FY', '')) || 25;
+          const yearDiff = curYVal - compYVal;
+          
+          if (startDate) {
+            const d = new Date(startDate);
+            d.setFullYear(d.getFullYear() - yearDiff);
+            matches = matches && (new Date(record.date) >= d);
+          }
+          if (endDate) {
+            const d = new Date(endDate);
+            d.setFullYear(d.getFullYear() - yearDiff);
+            matches = matches && (new Date(record.date) <= d);
+          }
+          return matches;
+        })();
+        
+        const matchesMonth = (() => {
+          if (activeMonths.length > 0 && activeMonths.length < 12) {
+            const rDate = new Date(record.date);
+            if (!isNaN(rDate.getTime())) {
+              return activeMonths.includes(rDate.getMonth());
+            }
+          }
+          return true;
+        })();
+
+        return matchesSector && matchesFYQtr && matchesSalesPerson && matchesStatus && matchesCategory && matchesWinRate && matchesDate && matchesMonth;
+      });
+      
+      if (searchTerm && searchTerm.trim()) {
+        const fuse = new Fuse(compData, {
+          keys: ['itemName', 'customerName', 'salesPerson', 'partners', 'productType'],
+          threshold: 0.35,
+          location: 0,
+          distance: 100,
+          includeScore: true,
+          useExtendedSearch: true
+        });
+        const results = fuse.search(searchTerm);
+        compData = results.map(result => result.item);
+      }
+
+      compTotalPipeline = compData.reduce((sum, r) => sum + r.amountK, 0);
+      hasCompData = compData.length > 0;
+      growth = compTotalPipeline > 0 ? ((totalPipeline - compTotalPipeline) / compTotalPipeline) * 100 : 0;
+    }
+
     return {
       totalPipeline,
       customerCount: customers.size,
       committedCount,
       committedValue,
       churnRisk,
-      riskReason
+      riskReason,
+      growth,
+      compTotalPipeline,
+      hasCompData
     };
-  }, [data]);
+  }, [
+    data,
+    allData,
+    selectedFYs,
+    selectedFYQtrs,
+    selectedSectors,
+    selectedSalesPersons,
+    selectedStatuses,
+    selectedCategories,
+    selectedWinRateOptions,
+    startDate,
+    endDate,
+    searchTerm
+  ]);
+
+  const trendText = useMemo(() => {
+    if (!metrics.hasCompData || metrics.compTotalPipeline === 0) {
+      return undefined;
+    }
+    const growthVal = metrics.growth;
+    const sign = growthVal >= 0 ? '+' : '';
+    return `${sign}${growthVal.toFixed(1)}% YoY`;
+  }, [metrics.growth, metrics.hasCompData, metrics.compTotalPipeline]);
 
   const container = {
     hidden: { opacity: 0 },
@@ -71,7 +228,7 @@ export default function KPISection({ data }: Props) {
           value={formatCurrency(metrics.totalPipeline)}
           sub={`${formatNumber(data.length)} Active Deals`}
           icon={<TrendingUp className="w-5 h-5" />}
-          trend="+12% / FY"
+          trend={trendText}
           accentColor="indigo"
         />
       </motion.div>

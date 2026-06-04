@@ -74,32 +74,55 @@ export default function QuotaCommissionHub({
 
   // Nested structure of quotas by fiscal year
   const [quotasByFY, setQuotasByFY] = useState<Record<string, Record<string, number>>>(() => {
+    const defaultQuotas: Record<string, Record<string, number>> = {
+      'FY24': { 'Julian': 20000, 'Joey': 35000, 'Elisa': 35000, 'Jackie': 5000 },
+      'FY25': { 'Julian': 23000, 'Joey': 41000, 'Elisa': 41000, 'Jackie': 5000 },
+      'FY26': { 'Julian': 25000, 'Joey': 45000, 'Elisa': 45000, 'Jackie': 5000 }, // Default 75000k total (Joey & Elisa share 45000k once)
+      'FY27': { 'Julian': 27000, 'Joey': 49000, 'Elisa': 49000, 'Jackie': 5000 },
+      'FY28': { 'Julian': 29000, 'Joey': 53000, 'Elisa': 53000, 'Jackie': 5000 },
+      'FY29': { 'Julian': 31000, 'Joey': 57000, 'Elisa': 57000, 'Jackie': 5000 },
+      'FY30': { 'Julian': 33000, 'Joey': 61000, 'Elisa': 61000, 'Jackie': 5000 },
+    };
+
     const saved = localStorage.getItem('sales_quotas_by_fy_allocations');
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved) as Record<string, Record<string, number>>;
+        // If the loaded structure is using old small scales (e.g., total sum < 15,000k), old Jackie high quotas, or un-reconsidered Joey/Elisa half-quotas, migrate it
+        let needsMigration = false;
+        Object.keys(parsed).forEach(fy => {
+          const sum = Object.values(parsed[fy] || {}).reduce((a: number, b: number) => a + b, 0);
+          if (sum < 15000) {
+            needsMigration = true;
+          }
+          if (parsed[fy] && parsed[fy]['Jackie'] && parsed[fy]['Jackie'] > 5000 && 
+              (parsed[fy]['Jackie'] === 10000 || parsed[fy]['Jackie'] === 12000 || parsed[fy]['Jackie'] === 13000 || parsed[fy]['Jackie'] === 14000 || parsed[fy]['Jackie'] === 15000 || parsed[fy]['Jackie'] === 16000 || parsed[fy]['Jackie'] === 17000)) {
+            needsMigration = true;
+          }
+          // If Joey/Elisa has the old 22,500k target on FY26 (meaning they were split), we migrate it to the correct 45,000k single-counted shared target
+          if (parsed[fy] && parsed[fy]['Joey'] && parsed[fy]['Joey'] < 30000 && fy === 'FY26') {
+            needsMigration = true;
+          }
+        });
+        if (needsMigration) {
+          const migrated = { ...defaultQuotas };
+          localStorage.setItem('sales_quotas_by_fy_allocations', JSON.stringify(migrated));
+          return migrated;
+        }
+        return parsed;
       } catch (e) {
         // ignore
       }
     }
-    // Set standard/defaults for FY24 to FY30
-    return {
-      'FY24': { 'Julian': 2000, 'Joey': 1500, 'Elisa': 1500, 'Jackie': 1000 },
-      'FY25': { 'Julian': 2300, 'Joey': 1700, 'Elisa': 1700, 'Jackie': 1200 },
-      'FY26': { 'Julian': 2500, 'Joey': 1850, 'Elisa': 1850, 'Jackie': 1300 }, // Default 7500k standard
-      'FY27': { 'Julian': 2700, 'Joey': 2000, 'Elisa': 2000, 'Jackie': 1400 },
-      'FY28': { 'Julian': 2900, 'Joey': 2150, 'Elisa': 2150, 'Jackie': 1500 },
-      'FY29': { 'Julian': 3100, 'Joey': 2300, 'Elisa': 2300, 'Jackie': 1600 },
-      'FY30': { 'Julian': 3300, 'Joey': 2450, 'Elisa': 2450, 'Jackie': 1700 },
-    };
+    return defaultQuotas;
   });
 
   const quotas = useMemo(() => {
     return quotasByFY[selectedFY] || {
-      'Julian': 2500,
-      'Joey': 1850,
-      'Elisa': 1850,
-      'Jackie': 1300
+      'Julian': 25000,
+      'Joey': 45000,
+      'Elisa': 45000,
+      'Jackie': 5000
     };
   }, [quotasByFY, selectedFY]);
 
@@ -179,7 +202,7 @@ export default function QuotaCommissionHub({
     // Auto-normalize active year if enabled
     if (checked) {
       setQuotasByFY(prev => {
-        const activeQuotas = { ...(prev[selectedFY] || { 'Julian': 2500, 'Joey': 1850, 'Elisa': 1850, 'Jackie': 1300 }) };
+        const activeQuotas = { ...(prev[selectedFY] || { 'Julian': 25000, 'Joey': 45000, 'Elisa': 45000, 'Jackie': 5000 }) };
         activeQuotas['Elisa'] = activeQuotas['Joey'];
         const updated = { ...prev, [selectedFY]: activeQuotas };
         localStorage.setItem('sales_quotas_by_fy_allocations', JSON.stringify(updated));
@@ -191,7 +214,7 @@ export default function QuotaCommissionHub({
   // Sync quota updates with local storage
   const handleQuotaChange = (rep: string, newVal: number) => {
     setQuotasByFY(prev => {
-      const activeQuotas = { ...(prev[selectedFY] || { 'Julian': 2500, 'Joey': 1850, 'Elisa': 1850, 'Jackie': 1300 }) };
+      const activeQuotas = { ...(prev[selectedFY] || { 'Julian': 25000, 'Joey': 45000, 'Elisa': 45000, 'Jackie': 5000 }) };
       activeQuotas[rep] = newVal;
       
       // Joey and Elisa are locked to have the SAME quota if linkJoeyElisa is enabled
@@ -215,20 +238,20 @@ export default function QuotaCommissionHub({
   // Helper: auto-balance quotas to meet target for active year
   const handleResetToStandardAdminPlan = () => {
     const standards: Record<string, Record<string, number>> = {
-      'FY24': { 'Julian': 2000, 'Joey': 1500, 'Elisa': 1500, 'Jackie': 1000 },
-      'FY25': { 'Julian': 2300, 'Joey': 1700, 'Elisa': 1700, 'Jackie': 1200 },
-      'FY26': { 'Julian': 2500, 'Joey': 1850, 'Elisa': 1850, 'Jackie': 1300 },
-      'FY27': { 'Julian': 2700, 'Joey': 2000, 'Elisa': 2000, 'Jackie': 1400 },
-      'FY28': { 'Julian': 2900, 'Joey': 2150, 'Elisa': 2150, 'Jackie': 1500 },
-      'FY29': { 'Julian': 3100, 'Joey': 2300, 'Elisa': 2300, 'Jackie': 1600 },
-      'FY30': { 'Julian': 3300, 'Joey': 2450, 'Elisa': 2450, 'Jackie': 1700 },
+      'FY24': { 'Julian': 20000, 'Joey': 35000, 'Elisa': 35000, 'Jackie': 5000 },
+      'FY25': { 'Julian': 23000, 'Joey': 41000, 'Elisa': 41000, 'Jackie': 5000 },
+      'FY26': { 'Julian': 25000, 'Joey': 45000, 'Elisa': 45000, 'Jackie': 5000 },
+      'FY27': { 'Julian': 27000, 'Joey': 49000, 'Elisa': 49000, 'Jackie': 5000 },
+      'FY28': { 'Julian': 29000, 'Joey': 53000, 'Elisa': 53000, 'Jackie': 5000 },
+      'FY29': { 'Julian': 31000, 'Joey': 57000, 'Elisa': 57000, 'Jackie': 5000 },
+      'FY30': { 'Julian': 33000, 'Joey': 61000, 'Elisa': 61000, 'Jackie': 5000 },
     };
     
     const standard = standards[selectedFY] || {
-      'Julian': 2500,
-      'Joey': 1850,
-      'Elisa': 1850,
-      'Jackie': 1300
+      'Julian': 25000,
+      'Joey': 45000,
+      'Elisa': 45000,
+      'Jackie': 5000
     };
 
     const standardsAccounts: Record<string, Record<string, number>> = {
@@ -266,7 +289,12 @@ export default function QuotaCommissionHub({
       return updated;
     });
     
-    const targetScale = Object.values(standard).reduce((sum, q) => sum + q, 0);
+    const targetScale = Object.keys(standard).reduce((sum, key) => {
+      if (key === 'Elisa' && (standard['Joey'] !== undefined)) {
+        return sum; // Shared, don't double count
+      }
+      return sum + standard[key];
+    }, 0);
     setAllocationSuccessMsg(
       t(
         `Reverted ${selectedFY} both financial & account targets to standards successfully (Total Target: ${targetScale.toLocaleString()}k).`, 
@@ -349,7 +377,7 @@ export default function QuotaCommissionHub({
       const closedWonDeals = repDeals.filter(r => r.winRate >= 0.99 || r.status === 'Won');
       const closedWon = closedWonDeals.reduce((sum, r) => sum + r.amountK, 0);
 
-      const quota = quotas[name] || 1500;
+      const quota = quotas[name] || 15000;
       const attainmentRate = quota > 0 ? parseFloat(((closedWon / quota) * 100).toFixed(1)) : 0;
       const coverageRatio = quota > 0 ? parseFloat(((totalPipeline / quota)).toFixed(2)) : 0;
 
@@ -581,7 +609,7 @@ export default function QuotaCommissionHub({
         : criteriaStr || (language !== 'en' ? '未选业绩口径' : 'No Segment Selected');
 
       // Automatically adjust target quota and account quotas dynamically based on count of selected quarters (e.g., 2 quarters = 50% target)
-      let baseQuota = quotas[name] || 1500;
+      let baseQuota = quotas[name] || 15000;
       let targetAccounts = accountQuotas[name] || 4;
       
       const quartersCount = scoreboardQuarters.length;
@@ -692,20 +720,34 @@ export default function QuotaCommissionHub({
   }, [data, quotas, accountQuotas, commissionRates, scoreboardQuarters, scoreboardWinRates, scoreboardWeighted, selectedFY, selectedCategories, selectedSectors, selectedStatuses, searchTerm]);
 
   const totalAllocatedQuota = useMemo(() => {
-    return Object.values(quotas).reduce((sum, q) => sum + q, 0);
+    // Elisa and Joey share a single quota pool, so we only count one of them
+    const keys = Object.keys(quotas);
+    let sum = 0;
+    let countedShared = false;
+    keys.forEach(k => {
+      if (k === 'Joey' || k === 'Elisa') {
+        if (!countedShared) {
+          sum += quotas[k];
+          countedShared = true;
+        }
+      } else {
+        sum += quotas[k];
+      }
+    });
+    return sum;
   }, [quotas]);
 
   const totalTeamTarget = useMemo(() => {
     const targets: Record<string, number> = {
-      'FY24': 6000,
-      'FY25': 6900,
-      'FY26': 7500, // standard baseline as requested by prompt
-      'FY27': 8100,
-      'FY28': 8700,
-      'FY29': 9300,
-      'FY30': 9900,
+      'FY24': 60000,
+      'FY25': 69000,
+      'FY26': 75000, // scaled to 75000k total target
+      'FY27': 81000,
+      'FY28': 87000,
+      'FY29': 93000,
+      'FY30': 99000,
     };
-    return targets[selectedFY] || 7500;
+    return targets[selectedFY] || 75000;
   }, [selectedFY]);
 
   const allocationDelta = totalAllocatedQuota - totalTeamTarget;
@@ -868,43 +910,32 @@ export default function QuotaCommissionHub({
       <div className="absolute bottom-0 left-0 -ml-16 -mb-16 w-44 h-44 bg-teal-50/50 rounded-full blur-[60px] pointer-events-none" />
 
       {/* Header & Section Title */}
-      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-6 border-b border-slate-100 pb-6 mb-8">
-        <div className="flex items-start gap-4">
-          <div className="w-12 h-12 rounded-2xl bg-indigo-50 flex items-center justify-center shrink-0 border border-indigo-100">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 border-b border-slate-100 pb-6 mb-8 items-start">
+        <div className="lg:col-span-12 xl:col-span-7 flex items-start gap-4">
+          <div className="w-12 h-12 rounded-2xl bg-indigo-50 border border-indigo-100/60 flex items-center justify-center shrink-0 shadow-sm">
             <Award className="w-6 h-6 text-indigo-600 animate-pulse" />
           </div>
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="px-2.5 py-0.5 bg-slate-900 text-white rounded-full text-[8px] font-black uppercase tracking-widest font-mono">
-                {t("Sales Ops Module", "销售运营后台")}
-              </span>
-              <span className="px-2.5 py-0.5 bg-emerald-500 text-white rounded-full text-[8px] font-black uppercase tracking-widest font-mono">
-                {t("Commission Expert Edition", "佣金专家系统")}
-              </span>
-            </div>
-            <h2 className="text-base font-black text-slate-900 uppercase tracking-widest font-display mt-2">
-              {t("Team Quota Allocation & Multi-rep Commission Dashboard", "团队配额指标规划与多维度销售提成管理中心")}
-            </h2>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-relaxed mt-1">
+          <div className="space-y-1">
+            <p className="text-[10px] md:text-xs font-semibold text-slate-500 leading-relaxed max-w-3xl">
               {t("Execute organizational strategy, manage commission models, and optimize onboarding for new representatives.", "深度践行组织规划，制定灵活佣金等级，辅助新星销售快速切入核心装机客户及重点渠道客群。")}
             </p>
           </div>
         </div>
 
         {/* Dynamic Navigation Controls & FY Filter Group */}
-        <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3 shrink-0">
+        <div className="lg:col-span-12 xl:col-span-5 flex flex-col sm:flex-row items-stretch sm:items-end gap-3 justify-start xl:justify-end mt-4 xl:mt-0 shrink-0">
           {/* Dynamic Financial Year Filter */}
-          <div className="flex flex-col gap-1 bg-slate-50 p-2 rounded-2xl border border-slate-150">
+          <div className="flex flex-col gap-1 bg-slate-50/85 p-2 rounded-2xl border border-slate-150 shrink-0">
             <span className="text-[7px] font-black text-slate-450 uppercase tracking-widest px-1">
               {t("Select Fiscal Year Target", "选择执行财年目标")}
             </span>
-            <div className="flex items-center bg-white p-1 rounded-xl border border-slate-200/60 gap-1">
+            <div className="flex items-center bg-white p-1 rounded-xl border border-slate-200/60 gap-1 flex-wrap">
               {['FY24', 'FY25', 'FY26', 'FY27', 'FY28', 'FY29', 'FY30'].map((fy) => (
                 <button
                   key={fy}
                   onClick={() => handleFYChange(fy)}
                   className={cn(
-                    "px-2.5 py-1.5 rounded-lg text-[8px] font-black uppercase tracking-wider transition-all cursor-pointer",
+                    "px-2 md:px-2.5 py-1.5 rounded-lg text-[8px] font-black uppercase tracking-wider transition-all cursor-pointer",
                     selectedFY === fy 
                       ? "bg-indigo-600 text-white shadow-sm" 
                       : "text-slate-600 hover:text-slate-950 hover:bg-slate-50"
@@ -917,15 +948,15 @@ export default function QuotaCommissionHub({
           </div>
 
           {/* Dynamic Navigation Tabs */}
-          <div className="flex flex-col gap-1 bg-slate-50 p-2 rounded-2xl border border-slate-150">
+          <div className="flex flex-col gap-1 bg-slate-50/85 p-2 rounded-2xl border border-slate-150 shrink-0">
             <span className="text-[7px] font-black text-slate-450 uppercase tracking-widest px-1">
               {t("Module Segment Navigation", "功能板块快速切换")}
             </span>
-            <div className="flex bg-white p-1 rounded-xl border border-slate-200/60 gap-1.5">
+            <div className="flex bg-white p-1 rounded-xl border border-slate-200/60 gap-1.5 flex-wrap">
               <button
                 onClick={() => setActiveTab('quotas')}
                 className={cn(
-                  "px-3 py-1.5 rounded-lg text-[8px] font-black uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer",
+                  "px-3 py-1.5 rounded-lg text-[8px] font-black uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer",
                   activeTab === 'quotas' 
                     ? "bg-indigo-50 text-indigo-700 shadow-none border-none" 
                     : "text-slate-500 hover:text-slate-900 hover:bg-slate-50"
@@ -938,7 +969,7 @@ export default function QuotaCommissionHub({
               <button
                 onClick={() => setActiveTab('allocator')}
                 className={cn(
-                  "px-3 py-1.5 rounded-lg text-[8px] font-black uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer",
+                  "px-3 py-1.5 rounded-lg text-[8px] font-black uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer",
                   activeTab === 'allocator' 
                     ? "bg-teal-50 text-teal-700 shadow-none border-none" 
                     : "text-slate-500 hover:text-slate-900 hover:bg-slate-50"
@@ -951,7 +982,7 @@ export default function QuotaCommissionHub({
               <button
                 onClick={() => setActiveTab('commissions')}
                 className={cn(
-                  "px-3 py-1.5 rounded-lg text-[8px] font-black uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer",
+                  "px-3 py-1.5 rounded-lg text-[8px] font-black uppercase tracking-wider transition-all flex items-center gap-1.5 cursor-pointer",
                   activeTab === 'commissions' 
                     ? "bg-emerald-50 text-emerald-700 shadow-none border-none" 
                     : "text-slate-500 hover:text-slate-900 hover:bg-slate-50"
@@ -1019,8 +1050,8 @@ export default function QuotaCommissionHub({
                 </div>
                 <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest leading-relaxed">
                   {t(
-                    `Firm constraint: Full year target assigned by organization must match exactly ¥7,500k.`,
-                    `政策刚性红线：公司下达的全年总团队指标必须保持锁死在 ¥7,500k。`
+                    `Firm constraint: Full year target assigned by organization must match exactly ¥${(totalTeamTarget).toLocaleString()}k.`,
+                    `政策刚性红线：公司下达的全年总团队指标必须保持锁死在 ¥${(totalTeamTarget).toLocaleString()}k。`
                   )}
                 </p>
               </div>
@@ -1054,7 +1085,7 @@ export default function QuotaCommissionHub({
             </div>
 
             {/* Quota slider config panel */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <div className="w-full">
               
               {/* SLIDERS & NUMBERS FOR REPS */}
               <div className="bg-slate-50/50 border border-slate-150 p-6 md:p-8 rounded-[2rem] space-y-6">
@@ -1092,7 +1123,7 @@ export default function QuotaCommissionHub({
                   </span>
                 </div>
 
-                <div className="space-y-5">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-2">
                   {/* JULIAN PLAN */}
                   <div className="space-y-2 p-4 bg-white rounded-xl border border-slate-100">
                     <div className="flex justify-between items-center">
@@ -1104,7 +1135,7 @@ export default function QuotaCommissionHub({
                         <input 
                           type="number"
                           min="0"
-                          max="10000"
+                          max="100000"
                           value={quotas['Julian'] || 0}
                           onChange={(e) => handleQuotaChange('Julian', parseInt(e.target.value) || 0)}
                           className="w-18 px-1.5 py-1 text-right text-xs font-mono font-black text-slate-800 bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500"
@@ -1114,17 +1145,17 @@ export default function QuotaCommissionHub({
                     </div>
                     <input 
                       type="range" 
-                      min="500" 
-                      max="5000" 
-                      step="50"
-                      value={Math.min(5000, Math.max(500, quotas['Julian'] || 1000))} 
+                      min="5000" 
+                      max="50000" 
+                      step="500"
+                      value={Math.min(50000, Math.max(5000, quotas['Julian'] || 10000))} 
                       onChange={(e) => handleQuotaChange('Julian', parseInt(e.target.value))}
                       className="w-full h-1.5 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-indigo-600"
                     />
                     <div className="flex justify-between text-[7px] text-slate-400 font-bold tracking-widest uppercase">
-                      <span>MIN: 500k</span>
+                      <span>MIN: 5,000k</span>
                       <span>{t("Julian: Handles current stable major accounts", "Julian负责当前主要在手活跃老客户")}</span>
-                      <span>MAX: 5,000k</span>
+                      <span>MAX: 50,000k</span>
                     </div>
 
                     {/* Account Count quota target for Julian */}
@@ -1163,7 +1194,7 @@ export default function QuotaCommissionHub({
                         <input 
                           type="number"
                           min="0"
-                          max="10000"
+                          max="100000"
                           value={quotas['Joey'] || 0}
                           onChange={(e) => handleQuotaChange('Joey', parseInt(e.target.value) || 0)}
                           className="w-18 px-1.5 py-1 text-right text-xs font-mono font-black text-slate-800 bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500"
@@ -1173,17 +1204,17 @@ export default function QuotaCommissionHub({
                     </div>
                     <input 
                       type="range" 
-                      min="500" 
-                      max="4000" 
-                      step="50"
-                      value={Math.min(4000, Math.max(500, quotas['Joey'] || 1000))} 
+                      min="5000" 
+                      max="80000" 
+                      step="500"
+                      value={Math.min(80000, Math.max(5000, quotas['Joey'] || 10000))} 
                       onChange={(e) => handleQuotaChange('Joey', parseInt(e.target.value))}
                       className="w-full h-1.5 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-teal-500"
                     />
                     <div className="flex justify-between text-[7px] text-teal-650 font-bold tracking-widest uppercase">
-                      <span>MIN: 500k</span>
+                      <span>MIN: 5,000k</span>
                       <span>{linkJoeyElisa ? t("Linked with Elisa joint formula", "联动等额机制中 - 协同组队打单") : t("Independent setting", "已由专家拆离独立设置")}</span>
-                      <span>MAX: 4,000k</span>
+                      <span>MAX: 80,000k</span>
                     </div>
 
                     {/* Account Count quota target for Joey */}
@@ -1222,7 +1253,7 @@ export default function QuotaCommissionHub({
                         <input 
                           type="number"
                           min="0"
-                          max="10000"
+                          max="100000"
                           value={quotas['Elisa'] || 0}
                           onChange={(e) => handleQuotaChange('Elisa', parseInt(e.target.value) || 0)}
                           className="w-18 px-1.5 py-1 text-right text-xs font-mono font-black text-slate-800 bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500"
@@ -1232,17 +1263,17 @@ export default function QuotaCommissionHub({
                     </div>
                     <input 
                       type="range" 
-                      min="500" 
-                      max="4000" 
-                      step="50"
-                      value={Math.min(4000, Math.max(500, quotas['Elisa'] || 1000))} 
+                      min="5000" 
+                      max="80000" 
+                      step="500"
+                      value={Math.min(80000, Math.max(5000, quotas['Elisa'] || 10000))} 
                       onChange={(e) => handleQuotaChange('Elisa', parseInt(e.target.value))}
                       className="w-full h-1.5 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-teal-500"
                     />
                     <div className="flex justify-between text-[7px] text-teal-650 font-bold tracking-widest uppercase">
-                      <span>MIN: 500k</span>
+                      <span>MIN: 5,000k</span>
                       <span>{t("Elisa: Just joined, shares Team Quota with Joey", "Elisa刚刚入职：与主力队员 Joey 共用一套机制")}</span>
-                      <span>MAX: 4,000k</span>
+                      <span>MAX: 80,000k</span>
                     </div>
 
                     {/* Account Count quota target for Elisa */}
@@ -1282,7 +1313,7 @@ export default function QuotaCommissionHub({
                         <input 
                           type="number"
                           min="0"
-                          max="10000"
+                          max="100000"
                           value={quotas['Jackie'] || 0}
                           onChange={(e) => handleQuotaChange('Jackie', parseInt(e.target.value) || 0)}
                           className="w-18 px-1.5 py-1 text-right text-xs font-mono font-black text-slate-800 bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500"
@@ -1292,17 +1323,17 @@ export default function QuotaCommissionHub({
                     </div>
                     <input 
                       type="range" 
-                      min="200" 
-                      max="3000" 
-                      step="50"
-                      value={Math.min(3000, Math.max(200, quotas['Jackie'] || 1000))} 
+                      min="2000" 
+                      max="30000" 
+                      step="500"
+                      value={Math.min(30000, Math.max(2000, quotas['Jackie'] || 10000))} 
                       onChange={(e) => handleQuotaChange('Jackie', parseInt(e.target.value))}
                       className="w-full h-1.5 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-emerald-500"
                     />
                     <div className="flex justify-between text-[7px] text-emerald-600/80 font-bold tracking-widest uppercase">
-                      <span>MIN: 200k</span>
+                      <span>MIN: 2,000k</span>
                       <span>{t("Jackie: New representative; tasked to develop channels & explore new deals", "新晋业务：开拓全新合作伙伴与新成交商机并存续承接划转项目")}</span>
-                      <span>MAX: 3,000k</span>
+                      <span>MAX: 30,000k</span>
                     </div>
 
                     {/* Account Count quota target for Jackie */}
@@ -1329,77 +1360,6 @@ export default function QuotaCommissionHub({
                     </div>
                   </div>
 
-                </div>
-              </div>
-
-              {/* COMPLIANCE AUDITING CARD */}
-              <div className="bg-slate-50/20 border border-slate-150 p-6 md:p-8 rounded-[2rem] flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center gap-2 mb-4">
-                    <ShieldAlert className="w-4 h-4 text-rose-500" />
-                    <span className="text-[10px] font-black text-slate-900 uppercase tracking-widest font-display">
-                      {t("Expert Administrative Audit Findings", "专家内审合规性评估报告")}
-                    </span>
-                  </div>
-                  
-                  <div className="space-y-4">
-                    <div className="flex gap-3 text-xs leading-relaxed text-slate-500">
-                      <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />
-                      <div>
-                        <p className="font-extrabold text-slate-800 uppercase tracking-wider text-[10px]">
-                          {t("Joey & Elisa Match Principle Violation: Checked", "Joey 与 Elisa 等额分配原则：合规")}
-                        </p>
-                        <p className="text-[9px] font-medium text-slate-400 uppercase tracking-widest mt-0.5">
-                          {t(
-                            "Formulaic lock is active. Scaling Joey's quota triggers a real-time identical quota copy to Elisa, ensuring perfect equal organizational alignment.",
-                            "绑定对联锁规则处于激活状态。任意一方的额度调整会自动对称修改另一方，从而保证同级组织激励对等。"
-                          )}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex gap-3 text-xs leading-relaxed text-slate-500">
-                      <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />
-                      <div>
-                        <p className="font-extrabold text-slate-800 uppercase tracking-wider text-[10px]">
-                          {t("Julian Single Quota Independence: Checked", "Julian 独立全额指标规则：合规")}
-                        </p>
-                        <p className="text-[9px] font-medium text-slate-400 uppercase tracking-widest mt-0.5">
-                          {t(
-                            "Julian is carrying single quota carry reflecting his high tenure portfolio and senior sector assignment.",
-                            "Julian 作为骨干资深人员，独立承担高容量全额指标，不受其他新晋或平行梯队配额机制的约束。"
-                          )}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex gap-3 text-xs leading-relaxed text-slate-500">
-                      <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />
-                      <div>
-                        <p className="font-extrabold text-slate-800 uppercase tracking-wider text-[10px]">
-                          {t("Jackie New-Hire Protection: Enabled", "Jackie 新晋销售保护屏障：就绪")}
-                        </p>
-                        <p className="text-[9px] font-medium text-slate-400 uppercase tracking-widest mt-0.5">
-                          {t(
-                            "The low 1,300k starter quota buffer combined with our transition plan guarantees manageable stress while preserving high motivation.",
-                            "起始规划 ¥1,300k 的极轻量指标搭配成熟的装机客户过渡转移方案，能有效平复入职过渡焦虑，激发渠道开辟干劲。"
-                          )}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="border-t border-slate-100 pt-6 mt-6 bg-slate-50 p-4 rounded-2xl border border-slate-150">
-                  <span className="text-[8px] font-black text-indigo-900 uppercase tracking-widest block mb-1">
-                    {t("Sales Ops Pro Tip", "销售科学提示建议")}
-                  </span>
-                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest leading-relaxed">
-                    {t(
-                      "To achieve optimal organizational morale, please utilize our 'Jackie Starter Vault' tab next, ensuring that over 50% win rate deals are allocated to Jackie immediately.",
-                      "为顺利实现预期绩效，建议您接下来切换至「杰基专享装机划转」选项卡，把优质且胜率超过 50% 的存续装机业务划转给 Jackie，帮她顺利斩获首单信心。"
-                    )}
-                  </p>
                 </div>
               </div>
 
@@ -1965,7 +1925,7 @@ export default function QuotaCommissionHub({
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-[10px] font-medium text-slate-600">
                       {performances.map((rep) => {
-                        const standardQuota = quotas[rep.name] || 1500;
+                        const standardQuota = quotas[rep.name] || 15000;
                         const won = rep.closedWon;
                         
                         // Break down commission details for clarity
